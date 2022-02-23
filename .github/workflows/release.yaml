@@ -67,6 +67,7 @@ jobs:
       id: get-last-release
       shell: bash
       run: |
+        set -o xtrace
         RELEASE_VERSION=${GITHUB_REF#refs/*/}
         major=$(echo "$RELEASE_VERSION"  | sed 's/^v\(.*\)/\1/' | cut -d. -f1)
         minor=$(echo "$RELEASE_VERSION" | cut -d. -f2)
@@ -83,7 +84,7 @@ jobs:
         fi
         LAST_VERSION="v${major}.${minor}.${revision}"
         START_SHA=$(git rev-list -n 1 $LAST_VERSION)
-        END_SHA=$(git rev-parse -n 1 $RELEASE_VERSION)
+        END_SHA=$(git rev-parse $RELEASE_VERSION)
         echo "::set-output name=release-version::$RELEASE_VERSION"
         echo "::set-output name=prev-release-version::$LAST_VERSION"
         echo "::set-output name=start-sha::$START_SHA"
