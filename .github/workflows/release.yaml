@@ -79,7 +79,7 @@ jobs:
           echo "Last release tag - $LAST_TAG"
           START_SHA=$(git rev-list -n 1 $LAST_TAG)
           echo "Release note generator start SHA - $START_SHA"
-          END_SHA=$((git rev-list -n 1 $RELEASE_VERSION)
+          END_SHA=$(git rev-list -n 1 $RELEASE_VERSION)
           echo "Release note generator end SHA - $END_SHA"
 
 
