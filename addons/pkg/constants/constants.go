@@ -17,6 +17,15 @@ const (
 	// CalicoAddonName is name of the Calico addon
 	CalicoAddonName = "calico"
 
+	// CPIAddonName is name of the cloud-provider-vsphere addon
+	CPIAddonName = "vsphere-cpi"
+
+	// PVCSIAddonName is name of the vsphere-pv-csi addon
+	PVCSIAddonName = "vsphere-pv-csi"
+
+	// CSIAddonName is name of the vsphere-csi addon
+	CSIAddonName = "vsphere-csi"
+
 	// TKGBomNamespace is the TKG add on BOM namespace.
 	TKGBomNamespace = "tkr-system"
 
@@ -127,11 +136,63 @@ const (
 	// InfrastructureRefDocker is the docker infrastructure
 	InfrastructureRefDocker = "DockerCluster"
 
+	// KappControllerAddonName is the addon name of Kapp Controller
+	KappControllerAddonName = "kapp-controller"
+
 	// SecretNameLogKey is the log key for Secrets
 	SecretNameLogKey = "secret-name"
 
 	// ClusterBootstrapManagedSecret is the name for the secrets that are managed by ClusterBootstrapController
 	ClusterBootstrapManagedSecret = "clusterbootstrap-secret"
+
+	// DefaultHTTPProxyClusterClassVarName is the default cluster variable name for HTTP proxy setting
+	DefaultHTTPProxyClusterClassVarName = "tkg.tanzu.vmware.com/tkg-http-proxy"
+
+	// DefaultHTTPSProxyClusterClassVarName is the default cluster variable name for HTTPS proxy setting
+	DefaultHTTPSProxyClusterClassVarName = "tkg.tanzu.vmware.com/tkg-https-proxy"
+
+	// DefaultNoProxyClusterClassVarName is the default cluster variable name for no proxy setting
+	DefaultNoProxyClusterClassVarName = "tkg.tanzu.vmware.com/tkg-no-proxy"
+
+	// DefaultProxyCaCertClusterClassVarName is the default cluster variable name for proxy CA cert
+	DefaultProxyCaCertClusterClassVarName = "tkg.tanzu.vmware.com/tkg-proxy-ca-cert"
+
+	// DefaultIPFamilyClusterClassVarName is the default cluster variable name for ip family
+	DefaultIPFamilyClusterClassVarName = "tkg.tanzu.vmware.com/tkg-ip-family"
+
+	// PackageInstallServiceAccount is service account name used for PackageInstall
+	PackageInstallServiceAccount = "tanzu-cluster-bootstrap-sa"
+
+	// PackageInstallClusterRole is cluster role name used for PackageInstall
+	PackageInstallClusterRole = "tanzu-cluster-bootstrap-clusterrole"
+
+	// PackageInstallClusterRoleBinding is cluster role binding name used for PackageInstall
+	PackageInstallClusterRoleBinding = "tanzu-cluster-bootstrap-clusterrolebinding"
+
+	// PackageInstallSyncPeriod is the sync period for kapp-controller to periodically reconcile a PackageInstall
+	PackageInstallSyncPeriod = time.Minute * 10
+
+	// RequeueAfterDuration determines the duration after which the Controller should requeue the reconcile key
+	RequeueAfterDuration = time.Second * 10
+
+	// WebhookCertDir is the directory where the certificate and key are stored for webhook server TLS handshake
+	WebhookCertDir = "/tmp/k8s-webhook-server/serving-certs"
+
+	// WebhookServiceName is the name of the k8s service that serves the admission requests
+	WebhookServiceName = "tanzu-addons-manager-webhook-service"
+
+	// WebhookScrtName is the name of secret that holds certificates and key for webhook service
+	WebhookScrtName = "webhook-tls"
+
+	// AddonWebhookLabelKey is the key for the label for addon admission webhooks
+	AddonWebhookLabelKey = "tkg.tanzu.vmware.com/addon-webhooks"
+
+	// AddonWebhookLabelValue is the value for the label for addon admission webhooks
+	AddonWebhookLabelValue = ""
+
+	// LocalObjectRefSuffix is the suffix of a field within the provider's CR. This suffix indicates that the field is a
+	// K8S typed local object reference
+	LocalObjectRefSuffix = "LocalObjRef"
 )
 
 // ClusterKind is the Kind for cluster-api Cluster object

@@ -6,6 +6,7 @@ package controllers
 import (
 	"context"
 	"os"
+	"path"
 	"path/filepath"
 	"testing"
 	"time"
@@ -19,7 +20,10 @@ import (
 	"k8s.io/client-go/kubernetes"
 	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
 	"k8s.io/client-go/rest"
+	capvv1beta1 "sigs.k8s.io/cluster-api-provider-vsphere/apis/v1beta1"
+	capvvmwarev1beta1 "sigs.k8s.io/cluster-api-provider-vsphere/apis/vmware/v1beta1"
 	clusterapiv1beta1 "sigs.k8s.io/cluster-api/api/v1beta1"
+	capiremote "sigs.k8s.io/cluster-api/controllers/remote"
 	controlplanev1beta1 "sigs.k8s.io/cluster-api/controlplane/kubeadm/api/v1beta1"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -32,17 +36,22 @@ import (
 
 	kappctrl "github.com/vmware-tanzu/carvel-kapp-controller/pkg/apis/kappctrl/v1alpha1"
 	pkgiv1alpha1 "github.com/vmware-tanzu/carvel-kapp-controller/pkg/apis/packaging/v1alpha1"
+	kapppkgv1alpha1 "github.com/vmware-tanzu/carvel-kapp-controller/pkg/apiserver/apis/datapackaging/v1alpha1"
 	antrea "github.com/vmware-tanzu/tanzu-framework/addons/controllers/antrea"
 	calico "github.com/vmware-tanzu/tanzu-framework/addons/controllers/calico"
+	cpi "github.com/vmware-tanzu/tanzu-framework/addons/controllers/cpi"
+	csi "github.com/vmware-tanzu/tanzu-framework/addons/controllers/csi"
 	kappcontroller "github.com/vmware-tanzu/tanzu-framework/addons/controllers/kapp-controller"
 	addonconfig "github.com/vmware-tanzu/tanzu-framework/addons/pkg/config"
 	"github.com/vmware-tanzu/tanzu-framework/addons/pkg/constants"
 	"github.com/vmware-tanzu/tanzu-framework/addons/pkg/crdwait"
 	testutil "github.com/vmware-tanzu/tanzu-framework/addons/testutil"
 	cniv1alpha1 "github.com/vmware-tanzu/tanzu-framework/apis/cni/v1alpha1"
+	cpiv1alpha1 "github.com/vmware-tanzu/tanzu-framework/apis/cpi/v1alpha1"
+	csiv1alpha1 "github.com/vmware-tanzu/tanzu-framework/apis/csi/v1alpha1"
 	runtanzuv1alpha1 "github.com/vmware-tanzu/tanzu-framework/apis/run/v1alpha1"
 	runtanzuv1alpha3 "github.com/vmware-tanzu/tanzu-framework/apis/run/v1alpha3"
-	tkgconstants "github.com/vmware-tanzu/tanzu-framework/pkg/v1/tkg/constants"
+	"github.com/vmware-tanzu/tanzu-framework/pkg/v1/webhooks"
 )
 
 // These tests use Ginkgo (BDD-style Go testing framework). Refer to
@@ -59,17 +68,26 @@ const (
 	addonClusterRoleBinding = "tkg-addons-app-cluster-role-binding"
 	addonImagePullPolicy    = "IfNotPresent"
 	corePackageRepoName     = "core"
+	webhookServiceName      = "tanzu-addons-manager-webhook-service"
+	webhookScrtName         = "webhook-tls"
+	addonWebhookLabelKey    = "tkg.tanzu.vmware.com/addon-webhooks"
+	addonWebhookLabelValue  = ""
+	cniWebhookManifestFile  = "testdata/test-antrea-calico-webhook-manifests.yaml"
 )
 
 var (
 	cfg           *rest.Config
 	k8sClient     client.Client
+	k8sConfig     *rest.Config
 	testEnv       *envtest.Environment
 	ctx           = ctrl.SetupSignalHandler()
 	scheme        = runtime.NewScheme()
+	mgr           manager.Manager
 	dynamicClient dynamic.Interface
 	cancel        context.CancelFunc
-	// clientset     *kubernetes.Clientset
+	certPath      string
+	keyPath       string
+	tmpDir        string
 )
 
 func TestAddonController(t *testing.T) {
@@ -94,7 +112,9 @@ var _ = BeforeSuite(func(done Done) {
 		"sigs.k8s.io/cluster-api": {"config/crd/bases",
 			"controlplane/kubeadm/config/crd/bases"},
 		"github.com/vmware-tanzu/carvel-kapp-controller": {"config/crds.yml"},
+		"sigs.k8s.io/cluster-api-provider-vsphere":       {"config/default/crd/bases", "config/supervisor/crd"},
 	}
+
 	externalCRDPaths, err := testutil.GetExternalCRDPaths(externalDeps)
 	Expect(err).NotTo(HaveOccurred())
 	Expect(externalCRDPaths).ToNot(BeEmpty())
@@ -106,6 +126,8 @@ var _ = BeforeSuite(func(done Done) {
 	cfg, err = testEnv.Start()
 	Expect(err).ToNot(HaveOccurred())
 	Expect(cfg).ToNot(BeNil())
+	testEnv.ControlPlane.APIServer.Configure().Append("admission-control", "MutatingAdmissionWebhook")
+	testEnv.ControlPlane.APIServer.Configure().Append("admission-control", "ValidatingAdmissionWebhook")
 
 	err = runtanzuv1alpha1.AddToScheme(scheme)
 	Expect(err).NotTo(HaveOccurred())
@@ -128,7 +150,22 @@ var _ = BeforeSuite(func(done Done) {
 	err = pkgiv1alpha1.AddToScheme(scheme)
 	Expect(err).NotTo(HaveOccurred())
 
+	err = kapppkgv1alpha1.AddToScheme(scheme)
+	Expect(err).NotTo(HaveOccurred())
+
 	err = cniv1alpha1.AddToScheme(scheme)
+	Expect(err).NotTo(HaveOccurred())
+
+	err = cpiv1alpha1.AddToScheme(scheme)
+	Expect(err).NotTo(HaveOccurred())
+
+	err = csiv1alpha1.AddToScheme(scheme)
+	Expect(err).NotTo(HaveOccurred())
+
+	err = capvv1beta1.AddToScheme(scheme)
+	Expect(err).NotTo(HaveOccurred())
+
+	err = capvvmwarev1beta1.AddToScheme(scheme)
 	Expect(err).NotTo(HaveOccurred())
 
 	k8sClient, err = client.New(cfg, client.Options{Scheme: scheme})
@@ -142,13 +179,21 @@ var _ = BeforeSuite(func(done Done) {
 	Expect(err).ToNot(HaveOccurred())
 	Expect(dynamicClient).ToNot(BeNil())
 
+	tmpDir, err = os.MkdirTemp("/tmp", "webhooktest")
+	Expect(err).ToNot(HaveOccurred())
+	certPath = path.Join(tmpDir, "tls.crt")
+	keyPath = path.Join(tmpDir, "tls.key")
+
 	options := manager.Options{
 		Scheme:             scheme,
 		MetricsBindAddress: "0",
+		Host:               "127.0.0.1",
 		Port:               9443,
+		CertDir:            tmpDir,
 	}
-	mgr, err := ctrl.NewManager(testEnv.Config, options)
+	mgr, err = ctrl.NewManager(testEnv.Config, options)
 	Expect(err).ToNot(HaveOccurred())
+	k8sConfig = mgr.GetConfig()
 
 	setupLog := ctrl.Log.WithName("controllers").WithName("Addon")
 
@@ -176,7 +221,7 @@ var _ = BeforeSuite(func(done Done) {
 		Client: mgr.GetClient(),
 		Log:    setupLog,
 		Scheme: mgr.GetScheme(),
-		Config: addonconfig.Config{
+		Config: addonconfig.AddonControllerConfig{
 			AppSyncPeriod:           appSyncPeriod,
 			AppWaitTimeout:          appWaitTimeout,
 			AddonNamespace:          addonNamespace,
@@ -194,6 +239,18 @@ var _ = BeforeSuite(func(done Done) {
 		Scheme: mgr.GetScheme(),
 	}).SetupWithManager(ctx, mgr, controller.Options{MaxConcurrentReconciles: 1})).To(Succeed())
 
+	Expect((&cpi.VSphereCPIConfigReconciler{
+		Client: mgr.GetClient(),
+		Log:    ctrl.Log.WithName("controllers").WithName("VSphereCPIConfig"),
+		Scheme: mgr.GetScheme(),
+	}).SetupWithManager(ctx, mgr, controller.Options{MaxConcurrentReconciles: 1})).To(Succeed())
+
+	Expect((&csi.VSphereCSIConfigReconciler{
+		Client: mgr.GetClient(),
+		Log:    ctrl.Log.WithName("controllers").WithName("VSphereCSIConfig"),
+		Scheme: mgr.GetScheme(),
+	}).SetupWithManager(ctx, mgr, controller.Options{MaxConcurrentReconciles: 1})).To(Succeed())
+
 	Expect((&antrea.AntreaConfigReconciler{
 		Client: mgr.GetClient(),
 		Log:    ctrl.Log.WithName("controllers").WithName("AntreaConfig"),
@@ -206,12 +263,47 @@ var _ = BeforeSuite(func(done Done) {
 		Scheme: mgr.GetScheme(),
 	}).SetupWithManager(ctx, mgr, controller.Options{MaxConcurrentReconciles: 1})).To(Succeed())
 
-	bootstrapReconciler := NewClusterBootstrapReconciler(mgr.GetClient(),
+	bootstrapReconciler := NewClusterBootstrapReconciler(
+		mgr.GetClient(),
 		ctrl.Log.WithName("controllers").WithName("ClusterBootstrap"),
 		mgr.GetScheme(),
-		ClusterBootstrapConfig{CNISelectionClusterVariableName: tkgconstants.DefaultCNISelectionClusterVariableName},
+		&addonconfig.ClusterBootstrapControllerConfig{
+			HTTPProxyClusterClassVarName:   constants.DefaultHTTPProxyClusterClassVarName,
+			HTTPSProxyClusterClassVarName:  constants.DefaultHTTPSProxyClusterClassVarName,
+			NoProxyClusterClassVarName:     constants.DefaultNoProxyClusterClassVarName,
+			ProxyCACertClusterClassVarName: constants.DefaultProxyCaCertClusterClassVarName,
+			IPFamilyClusterClassVarName:    constants.DefaultIPFamilyClusterClassVarName,
+			SystemNamespace:                constants.TKGSystemNS,
+			PkgiServiceAccount:             constants.PackageInstallServiceAccount,
+			PkgiClusterRole:                constants.PackageInstallClusterRole,
+			PkgiClusterRoleBinding:         constants.PackageInstallClusterRoleBinding,
+			PkgiSyncPeriod:                 constants.PackageInstallSyncPeriod,
+		},
 	)
 	Expect(bootstrapReconciler.SetupWithManager(ctx, mgr, controller.Options{MaxConcurrentReconciles: 1})).To(Succeed())
+
+	// set up a ClusterCacheTracker to provide to PackageInstallStatus controller which requires a connection to remote clusters
+	l := ctrl.Log.WithName("remote").WithName("ClusterCacheTracker")
+	tracker, err := capiremote.NewClusterCacheTracker(mgr, capiremote.ClusterCacheTrackerOptions{Log: &l})
+	Expect(err).Should(BeNil())
+	Expect(tracker).ShouldNot(BeNil())
+
+	// set up CluterCacheReconciler to drops the accessor via deleteAccessor upon cluster deletion
+	Expect((&capiremote.ClusterCacheReconciler{
+		Client:  mgr.GetClient(),
+		Log:     ctrl.Log.WithName("remote").WithName("ClusterCacheReconciler"),
+		Tracker: tracker,
+	}).SetupWithManager(ctx, mgr, controller.Options{MaxConcurrentReconciles: 1})).To(Succeed())
+
+	Expect((NewPackageInstallStatusReconciler(
+		mgr.GetClient(),
+		ctrl.Log.WithName("controllers").WithName("PackageInstallStatus"),
+		mgr.GetScheme(),
+		&addonconfig.PackageInstallStatusControllerConfig{
+			SystemNamespace: constants.TKGSystemNS,
+		},
+		tracker,
+	)).SetupWithManager(ctx, mgr, controller.Options{MaxConcurrentReconciles: 1})).To(Succeed())
 
 	// pre-create namespace
 	ns := &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: "tkr-system"}}
@@ -219,6 +311,17 @@ var _ = BeforeSuite(func(done Done) {
 
 	ns = &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: "tkg-system"}}
 	Expect(k8sClient.Create(context.TODO(), ns)).To(Succeed())
+
+	_, err = webhooks.InstallNewCertificates(ctx, k8sConfig, certPath, keyPath, webhookScrtName, addonNamespace, webhookServiceName, addonWebhookLabelKey+"="+addonWebhookLabelValue)
+	Expect(err).ToNot(HaveOccurred())
+
+	// Set up the webhooks in the manager
+	err = (&cniv1alpha1.AntreaConfig{}).SetupWebhookWithManager(mgr)
+	Expect(err).ToNot(HaveOccurred())
+	err = (&cniv1alpha1.CalicoConfig{}).SetupWebhookWithManager(mgr)
+	Expect(err).ToNot(HaveOccurred())
+	err = (&webhooks.ClusterPause{Client: k8sClient}).SetupWebhookWithManager(mgr)
+	Expect(err).ToNot(HaveOccurred())
 
 	go func() {
 		defer GinkgoRecover()

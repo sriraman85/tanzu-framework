@@ -51,7 +51,7 @@ type AddonReconciler struct {
 	Log        logr.Logger
 	Scheme     *runtime.Scheme
 	controller controller.Controller
-	Config     addonconfig.Config
+	Config     addonconfig.AddonControllerConfig
 }
 
 // SetupWithManager performs the setup actions for an add on controller, using the passed in mgr.
@@ -116,7 +116,11 @@ func (r *AddonReconciler) Reconcile(ctx context.Context, req ctrl.Request) (_ ct
 		return ctrl.Result{}, err
 	}
 
-	tkrName := cluster.Labels[constants.TKRLabel]
+	tkrName, err := util.GetClusterLabel(cluster.Labels, constants.TKRLabel)
+	if err != nil {
+		return ctrl.Result{}, err
+	}
+
 	tkr, err := util.GetTKRByName(ctx, r.Client, tkrName)
 	if err != nil {
 		log.Error(err, "unable to fetch TKR object", "name", tkrName)

@@ -5,7 +5,6 @@ package util
 
 import (
 	"fmt"
-	"testing"
 
 	. "github.com/onsi/ginkgo"
 	. "github.com/onsi/gomega"
@@ -24,11 +23,6 @@ const (
 	testK8sVersion          = "v1.22.3"
 	testNamespace           = "test-ns"
 )
-
-func TestTKRTestUnit(t *testing.T) {
-	RegisterFailHandler(Fail)
-	RunSpecs(t, "util/Cluster Variable Util Tests")
-}
 
 var _ = Describe("Parse String Cluster Variable", func() {
 	Context("ParseClusterVariableString()", func() {
@@ -134,6 +128,20 @@ var _ = Describe("Parse String Cluster Variable", func() {
 			It("should return empty value", func() {
 				Expect(err).NotTo(HaveOccurred())
 				Expect(result).To(Equal(""))
+			})
+		})
+
+		When("cluster variable of type (bool)", func() {
+			var result bool
+			BeforeEach(func() {
+				clusterObj.Spec.Topology.Variables = []clusterapiv1beta1.ClusterVariable{
+					{Name: testClusterVariableName, Value: apiextensionsv1.JSON{Raw: []byte(`true`)}},
+				}
+				result, err = ParseClusterVariableBool(clusterObj, testClusterVariableName)
+			})
+			It("should return variable value", func() {
+				Expect(err).NotTo(HaveOccurred())
+				Expect(result).To(BeTrue())
 			})
 		})
 

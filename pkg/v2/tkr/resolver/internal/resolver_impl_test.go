@@ -4,27 +4,27 @@
 package internal
 
 import (
-	"fmt"
 	"testing"
 	"time"
 
-	. "github.com/onsi/ginkgo"
+	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/apimachinery/pkg/util/rand"
-	clusterv1 "sigs.k8s.io/cluster-api/api/v1beta1"
-	"sigs.k8s.io/cluster-api/util/conditions"
 
 	runv1 "github.com/vmware-tanzu/tanzu-framework/apis/run/v1alpha3"
 	"github.com/vmware-tanzu/tanzu-framework/pkg/v2/tkr/resolver/data"
+	"github.com/vmware-tanzu/tanzu-framework/pkg/v2/tkr/util/testdata"
 	"github.com/vmware-tanzu/tanzu-framework/pkg/v2/tkr/util/version"
 )
 
 func TestResolver(t *testing.T) {
 	RegisterFailHandler(Fail)
-	RunSpecs(t, "tkr/resolver/internal Unit Tests")
+	suiteConfig, _ := GinkgoConfiguration()
+	suiteConfig.FailFast = true
+	RunSpecs(t, "tkr/resolver/internal Unit Tests", suiteConfig)
 }
 
 const (
@@ -37,34 +37,10 @@ const (
 
 var k8sVersions = []string{k8s1_20_1, k8s1_20_2, k8s1_21_1, k8s1_21_3, k8s1_22_0}
 
-var (
-	osUbuntu = runv1.OSInfo{
-		Type:    "linux",
-		Name:    "ubuntu",
-		Version: "20.04",
-		Arch:    "amd64",
-	}
-	osAmazon = runv1.OSInfo{
-		Type:    "linux",
-		Name:    "amazon",
-		Version: "2",
-		Arch:    "amd64",
-	}
-	osPhoton = runv1.OSInfo{
-		Type:    "linux",
-		Name:    "photon",
-		Version: "3",
-		Arch:    "amd64",
-	}
-)
-var osInfos = []runv1.OSInfo{osUbuntu, osAmazon, osPhoton}
-
-var regionPrefixes = []string{"us", "ap", "eu", "sa"}
-var regionDirections = []string{"central", "north", "south", "west", "east"}
-
 const numOSImages = 50
 const numTKRs = 10
-const maxMDs = 5
+
+const numRepeats = 1000
 
 var _ = Describe("Cache implementation", func() {
 	var (
@@ -77,9 +53,9 @@ var _ = Describe("Cache implementation", func() {
 	)
 
 	BeforeEach(func() {
-		osImages = genOSImages(numOSImages)
-		osImagesByK8sVersion = sortOSImagesByK8sVersion(osImages)
-		tkrs = genTKRs(numTKRs, osImagesByK8sVersion)
+		osImages = testdata.GenOSImages(k8sVersions, numOSImages)
+		osImagesByK8sVersion = testdata.SortOSImagesByK8sVersion(osImages)
+		tkrs = testdata.GenTKRs(numTKRs, osImagesByK8sVersion)
 
 		r = NewResolver()
 	})
@@ -162,8 +138,8 @@ var _ = Describe("Cache implementation", func() {
 			)
 
 			BeforeEach(func() {
-				tkrSubset = randSubsetOfTKRs(tkrs)
-				osImageSubset = randSubsetOfOSImages(osImages)
+				tkrSubset = testdata.RandNonEmptySubsetOfTKRs(tkrs)
+				osImageSubset = testdata.RandNonEmptySubsetOfOSImages(osImages)
 
 				for _, tkr := range tkrSubset {
 					Expect(r.cache.tkrs).To(HaveKeyWithValue(tkr.Name, tkr))
@@ -202,8 +178,8 @@ var _ = Describe("Cache implementation", func() {
 		)
 
 		BeforeEach(func() {
-			tkrSubset = randSubsetOfTKRs(tkrs)
-			osImageSubset = randSubsetOfOSImages(osImages)
+			tkrSubset = testdata.RandNonEmptySubsetOfTKRs(tkrs)
+			osImageSubset = testdata.RandNonEmptySubsetOfOSImages(osImages)
 
 			for _, tkr := range tkrSubset {
 				Expect(r.cache.tkrs).To(HaveKeyWithValue(tkr.Name, tkr))
@@ -235,28 +211,53 @@ var _ = Describe("Cache implementation", func() {
 })
 
 var _ = Describe("normalize(query)", func() {
-	When("label selectors are empty", func() {
-		var (
-			initialQuery    = genQueryAllForK8sVersion(k8sVersions[rand.Intn(len(k8sVersions))])
-			normalizedQuery data.Query
-		)
+	var (
+		initialQuery,
+		normalizedQuery data.Query
+	)
 
+	When("label selectors are empty", func() {
 		BeforeEach(func() {
-			normalizedQuery = normalize(initialQuery)
+			initialQuery = testdata.GenQueryAllForK8sVersion(k8sVersions[rand.Intn(len(k8sVersions))])
 		})
 
 		It("should add label requirements for the k8s version prefix", func() {
+			normalizedQuery = normalize(initialQuery)
+
 			assertOSImageQueryExpectations(normalizedQuery.ControlPlane, initialQuery.ControlPlane)
-			for name, initialMDQuery := range initialQuery.MachineDeployments {
-				Expect(normalizedQuery.MachineDeployments).To(HaveKey(name))
-				assertOSImageQueryExpectations(normalizedQuery.MachineDeployments[name], initialMDQuery)
+			Expect(normalizedQuery.MachineDeployments).To(HaveLen(len(initialQuery.MachineDeployments)))
+			for i, initialMDQuery := range initialQuery.MachineDeployments {
+				assertOSImageQueryExpectations(normalizedQuery.MachineDeployments[i], initialMDQuery)
 			}
+		})
+
+		When("the controlPlane does not need to be resolved", func() {
+			BeforeEach(func() {
+				initialQuery.ControlPlane = nil
+			})
+
+			It("should keep it as is", func() {
+				normalizedQuery = normalize(initialQuery)
+
+				Expect(normalizedQuery.ControlPlane).To(BeNil())
+			})
 		})
 	})
 
 })
 
-func assertOSImageQueryExpectations(normalized, initial data.OSImageQuery) {
+func repeat(n int, f func()) {
+	for i := 0; i < n; i++ {
+		f()
+	}
+}
+
+func assertOSImageQueryExpectations(normalized, initial *data.OSImageQuery) {
+	if initial == nil {
+		Expect(normalized).To(BeNil())
+		return
+	}
+	Expect(normalized).ToNot(BeNil())
 	Expect(normalized.K8sVersionPrefix).To(Equal(initial.K8sVersionPrefix))
 	for _, selector := range []labels.Selector{normalized.TKRSelector, normalized.OSImageSelector} {
 		Expect(selector.Matches(labels.Set{version.Label(initial.K8sVersionPrefix): ""})).To(BeTrue())
@@ -280,15 +281,15 @@ var _ = Describe("Resolve()", func() {
 	)
 
 	BeforeEach(func() {
-		osImages = genOSImages(numOSImages)
-		osImagesByK8sVersion = sortOSImagesByK8sVersion(osImages)
-		tkrs = genTKRs(numTKRs, osImagesByK8sVersion)
+		osImages = testdata.GenOSImages(k8sVersions, numOSImages)
+		osImagesByK8sVersion = testdata.SortOSImagesByK8sVersion(osImages)
+		tkrs = testdata.GenTKRs(numTKRs, osImagesByK8sVersion)
 
 		r = NewResolver()
 
-		k8sVersion = chooseK8sVersionFromTKRs(tkrs)
-		k8sVersionPrefix = chooseK8sVersionPrefix(k8sVersion)
-		queryK8sVersionPrefix = genQueryAllForK8sVersion(k8sVersionPrefix)
+		k8sVersion = testdata.ChooseK8sVersionFromTKRs(tkrs)
+		k8sVersionPrefix = testdata.ChooseK8sVersionPrefix(k8sVersion)
+		queryK8sVersionPrefix = testdata.GenQueryAllForK8sVersion(k8sVersionPrefix)
 	})
 
 	BeforeEach(func() {
@@ -304,39 +305,93 @@ var _ = Describe("Resolve()", func() {
 		result := r.Resolve(queryK8sVersionPrefix)
 
 		assertOSImageResultExpectations(result.ControlPlane, queryK8sVersionPrefix.ControlPlane, k8sVersionPrefix)
-		for name, osImageQuery := range queryK8sVersionPrefix.MachineDeployments {
-			Expect(result.MachineDeployments).To(HaveKey(name))
-			assertOSImageResultExpectations(result.MachineDeployments[name], osImageQuery, k8sVersionPrefix)
+		Expect(result.MachineDeployments).To(HaveLen(len(queryK8sVersionPrefix.MachineDeployments)))
+		for i, osImageQuery := range queryK8sVersionPrefix.MachineDeployments {
+			assertOSImageResultExpectations(result.MachineDeployments[i], osImageQuery, k8sVersionPrefix)
 		}
+	})
+
+	When("the controlPlane part doesn't need to be resolved", func() {
+		BeforeEach(func() {
+			queryK8sVersionPrefix.ControlPlane = nil
+		})
+
+		repeat(numRepeats, func() {
+			It("should skip resolving the control plane only", func() {
+				result := r.Resolve(queryK8sVersionPrefix)
+
+				assertOSImageResultExpectations(result.ControlPlane, queryK8sVersionPrefix.ControlPlane, k8sVersionPrefix)
+				Expect(result.MachineDeployments).To(HaveLen(len(queryK8sVersionPrefix.MachineDeployments)))
+				for i, osImageQuery := range queryK8sVersionPrefix.MachineDeployments {
+					assertOSImageResultExpectations(result.MachineDeployments[i], osImageQuery, k8sVersionPrefix)
+				}
+			})
+		})
+	})
+
+	When("the md[0] part doesn't need to be resolved", func() {
+		BeforeEach(func() {
+			Expect(queryK8sVersionPrefix.MachineDeployments).ToNot(BeEmpty())
+			queryK8sVersionPrefix.MachineDeployments[0] = nil
+		})
+
+		repeat(numRepeats, func() {
+			It("should skip resolving the md[0] only", func() {
+				result := r.Resolve(queryK8sVersionPrefix)
+
+				assertOSImageResultExpectations(result.ControlPlane, queryK8sVersionPrefix.ControlPlane, k8sVersionPrefix)
+				Expect(result.MachineDeployments).To(HaveLen(len(queryK8sVersionPrefix.MachineDeployments)))
+				for i, osImageQuery := range queryK8sVersionPrefix.MachineDeployments {
+					assertOSImageResultExpectations(result.MachineDeployments[i], osImageQuery, k8sVersionPrefix)
+				}
+			})
+		})
+	})
+
+	When("a TKR lists non-existent OSImages", func() {
+		var (
+			tkrWithNonExistentOSImages *runv1.TanzuKubernetesRelease
+		)
+
+		BeforeEach(func() {
+			tkrWithNonExistentOSImages = testdata.ChooseTKR(tkrs)
+			for i := range tkrWithNonExistentOSImages.Spec.OSImages {
+				osImageRef := &tkrWithNonExistentOSImages.Spec.OSImages[i]
+				osImageRef.Name = osImageRef.Name + "-non-existent"
+			}
+
+			r.Add(tkrWithNonExistentOSImages)
+
+			k8sVersion = tkrWithNonExistentOSImages.Spec.Kubernetes.Version
+			k8sVersionPrefix = testdata.ChooseK8sVersionPrefix(k8sVersion)
+			queryK8sVersionPrefix = testdata.GenQueryAllForK8sVersion(k8sVersionPrefix)
+		})
+
+		repeat(numRepeats, func() {
+			It("should not panic and keep resolving", func() {
+				result := r.Resolve(queryK8sVersionPrefix)
+
+				for _, tkrs := range result.ControlPlane.TKRsByK8sVersion {
+					for tkrName := range tkrs {
+						Expect(tkrName).ToNot(Equal(tkrWithNonExistentOSImages.Name))
+					}
+				}
+			})
+		})
 	})
 })
 
-func chooseK8sVersionPrefix(v string) string {
-	versionPrefixes := version.Prefixes(v)
-	vs := make([]string, 0, len(versionPrefixes))
-	for v := range versionPrefixes {
-		vs = append(vs, v)
+func assertOSImageResultExpectations(osImageResult *data.OSImageResult, osImageQuery *data.OSImageQuery, k8sVersionPrefix string) {
+	if osImageQuery == nil {
+		Expect(osImageResult).To(BeNil())
+		return
 	}
-	return vs[rand.Intn(len(vs))]
-}
-
-func chooseK8sVersion(osImagesByK8sVersion map[string]data.OSImages) string {
-	ks := make([]string, 0, len(osImagesByK8sVersion))
-	for k := range osImagesByK8sVersion {
-		ks = append(ks, k)
+	if k8sVersionPrefix == "" {
+		Expect(osImageResult.K8sVersion).To(Equal(""))
+		Expect(osImageResult.TKRName).To(Equal(""))
+		return
 	}
-	return ks[rand.Intn(len(ks))]
-}
-
-func chooseK8sVersionFromTKRs(tkrs data.TKRs) string {
-	ks := make([]string, 0, len(tkrs))
-	for _, tkr := range tkrs {
-		ks = append(ks, tkr.Spec.Kubernetes.Version)
-	}
-	return ks[rand.Intn(len(ks))]
-}
-
-func assertOSImageResultExpectations(osImageResult data.OSImageResult, osImageQuery data.OSImageQuery, k8sVersionPrefix string) {
+	Expect(osImageResult).ToNot(BeNil())
 	Expect(version.Prefixes(osImageResult.K8sVersion)).To(HaveKey(k8sVersionPrefix))
 	Expect(version.Prefixes(version.Label(osImageResult.TKRName))).To(HaveKey(version.Label(k8sVersionPrefix)))
 
@@ -355,165 +410,5 @@ func assertOSImageResultExpectations(osImageResult data.OSImageResult, osImageQu
 				Expect(osImageQuery.OSImageSelector.Matches(labels.Set(osImage.Labels)))
 			}
 		}
-	}
-}
-
-func genOSImages(numOSImages int) data.OSImages {
-	result := make(data.OSImages, numOSImages)
-	for range make([]struct{}, numOSImages) {
-		osImage := genOSImage()
-		result[osImage.Name] = osImage
-	}
-	return result
-}
-
-func genOSImage() *runv1.OSImage {
-	k8sVersion := k8sVersions[rand.Intn(len(k8sVersions))]
-	os := osInfos[rand.Intn(len(osInfos))]
-	image := genAMIInfo()
-
-	return &runv1.OSImage{
-		ObjectMeta: metav1.ObjectMeta{Name: genOSImageName(k8sVersion, os, image)},
-		Spec: runv1.OSImageSpec{
-			KubernetesVersion: k8sVersion,
-			OS:                os,
-			Image:             image,
-		},
-		Status: runv1.OSImageStatus{
-			Conditions: genConditions(),
-		},
-	}
-}
-
-func genConditions() []clusterv1.Condition {
-	var result []clusterv1.Condition
-	for _, condType := range []clusterv1.ConditionType{runv1.ConditionCompatible, runv1.ConditionValid} {
-		if cond := genFalseCondition(condType); cond != nil {
-			result = append(result, *cond)
-		}
-	}
-	return result
-}
-
-func genFalseCondition(condType clusterv1.ConditionType) *clusterv1.Condition {
-	if rand.Intn(10) < 2 { // 20%
-		return conditions.FalseCondition(condType, rand.String(10), clusterv1.ConditionSeverityWarning, rand.String(20))
-	}
-	return nil
-}
-
-func genAMIInfo() runv1.MachineImageInfo {
-	return runv1.MachineImageInfo{
-		Type: "ami",
-		Ref: map[string]interface{}{
-			"id":     rand.String(10),
-			"region": genRegion(),
-			"foo": map[string]interface{}{
-				"bar": rand.Intn(2) == 1,
-			},
-		},
-	}
-}
-
-func genRegion() string {
-	return fmt.Sprintf("%s-%s-%v", regionPrefixes[rand.Intn(len(regionPrefixes))], regionDirections[rand.Intn(len(regionDirections))], rand.Intn(3))
-}
-
-func genOSImageName(k8sVersion string, os runv1.OSInfo, image runv1.MachineImageInfo) string {
-	return fmt.Sprintf("%s-%s-%s-%s-%s", version.Label(k8sVersion), image.Type, os.Name, os.Version, rand.String(5))
-}
-
-func sortOSImagesByK8sVersion(allOSImages data.OSImages) map[string]data.OSImages {
-	result := make(map[string]data.OSImages, len(k8sVersions))
-	for _, osImage := range allOSImages {
-		osImages, exists := result[osImage.Spec.KubernetesVersion]
-		if !exists {
-			osImages = data.OSImages{}
-			result[osImage.Spec.KubernetesVersion] = osImages
-		}
-		osImages[osImage.Name] = osImage
-	}
-	return result
-}
-
-func genTKRs(numTKRs int, osImagesByK8sVersion map[string]data.OSImages) data.TKRs {
-	result := make(data.TKRs, numTKRs)
-	for range make([]struct{}, numTKRs) {
-		tkr := genTKR(osImagesByK8sVersion)
-		result[tkr.Name] = tkr
-	}
-	return result
-}
-
-func genTKR(osImagesByK8sVersion map[string]data.OSImages) *runv1.TanzuKubernetesRelease {
-	k8sVersion := chooseK8sVersion(osImagesByK8sVersion)
-	tkrSuffix := fmt.Sprintf("-tkg.%v", rand.Intn(3)+1)
-
-	v := k8sVersion + tkrSuffix
-
-	return &runv1.TanzuKubernetesRelease{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:   version.Label(v),
-			Labels: labels.Set{},
-		},
-		Spec: runv1.TanzuKubernetesReleaseSpec{
-			Version:  v,
-			OSImages: osImageRefs(randSubsetOfOSImages(osImagesByK8sVersion[k8sVersion])),
-			Kubernetes: runv1.KubernetesSpec{
-				Version: k8sVersion,
-			},
-		},
-	}
-}
-
-func osImageRefs(osImages data.OSImages) []corev1.LocalObjectReference {
-	result := make([]corev1.LocalObjectReference, 0, len(osImages))
-	for _, osImage := range osImages {
-		result = append(result, corev1.LocalObjectReference{Name: osImage.Name})
-	}
-	return result
-}
-
-func randSubsetOfOSImages(osImages data.OSImages) data.OSImages {
-	result := make(data.OSImages, len(osImages))
-	for name, osImage := range osImages {
-		if rand.Intn(2) == 1 {
-			result[name] = osImage
-		}
-	}
-	return result
-}
-
-func randSubsetOfTKRs(tkrs data.TKRs) data.TKRs {
-	result := make(data.TKRs, len(tkrs))
-	for name, tkr := range tkrs {
-		if rand.Intn(2) == 1 {
-			result[name] = tkr
-		}
-	}
-	return result
-}
-
-func genQueryAllForK8sVersion(k8sVersionPrefix string) data.Query {
-	return data.Query{
-		ControlPlane:       genOSImageQueryAllForK8sVersion(k8sVersionPrefix),
-		MachineDeployments: genMDQueriesAllForK8sVersion(k8sVersionPrefix),
-	}
-}
-
-func genMDQueriesAllForK8sVersion(k8sVersionPrefix string) map[string]data.OSImageQuery {
-	numMDs := rand.Intn(maxMDs) + 1
-	result := make(map[string]data.OSImageQuery, numMDs)
-	for range make([]struct{}, numMDs) {
-		result[rand.String(rand.IntnRange(8, 12))] = genOSImageQueryAllForK8sVersion(k8sVersionPrefix)
-	}
-	return result
-}
-
-func genOSImageQueryAllForK8sVersion(k8sVersionPrefix string) data.OSImageQuery {
-	return data.OSImageQuery{
-		K8sVersionPrefix: k8sVersionPrefix,
-		TKRSelector:      labels.Everything(),
-		OSImageSelector:  labels.Everything(),
 	}
 }

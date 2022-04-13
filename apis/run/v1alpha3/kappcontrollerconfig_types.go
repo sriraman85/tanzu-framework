@@ -13,24 +13,28 @@ import (
 type KappControllerConfigSpec struct {
 	// The namespace in which kapp-controller is deployed
 	//+kubebuilder:validation:Optional
-	//+kubebuilder:default:=kube-system
+	//+kubebuilder:default:=tkg-system
 	Namespace string `json:"namespace,omitempty"`
 
-	KappController KappController `json:"kappController,omitempty"`
+	//+kubebuilder:validation:Optional
+	//+kubebuilder:default:={deployment:{hostNetwork:true}}
+	KappController KappController `json:"kappController,omitempty"` // object default needs at least one param so that CRD generation is not null, issue https://github.com/kubernetes-sigs/controller-tools/issues/631
 }
 
 type KappController struct {
 	// Whether to create namespace specified for kapp-controller
 	//+kubebuilder:validation:Optional
-	//+kubebuilder:default:=true
+	//+kubebuilder:default:=false
 	CreateNamespace bool `json:"createNamespace,omitempty"`
 
 	// The namespace value used for global packaging resources. Any Package and PackageMetadata CRs within that namespace will be included in all other namespaces on the cluster, without duplicating them
 	//+kubebuilder:validation:Optional
-	//+kubebuilder:default:=tanzu-package-repo-global
+	//+kubebuilder:default:=tkg-system
 	GlobalNamespace string `json:"globalNamespace,omitempty"`
 
-	Deployment KappDeployment `json:"deployment,omitempty"`
+	//+kubebuilder:validation:Optional
+	//+kubebuilder:default:={hostNetwork:true}
+	Deployment KappDeployment `json:"deployment,omitempty"` // object default needs at least one param so that CRD generation is not null, issue https://github.com/kubernetes-sigs/controller-tools/issues/631
 
 	Config KappConfig `json:"config,omitempty"`
 }
@@ -58,7 +62,7 @@ type KappDeployment struct {
 
 	// Bind port for kapp-controller API
 	//+kubebuilder:validation:Optional
-	//+kubebuilder:default:=10350
+	//+kubebuilder:default:=10100
 	APIPort int `json:"apiPort,omitempty"`
 
 	// Address for metrics server
@@ -68,19 +72,19 @@ type KappDeployment struct {
 }
 
 type KappConfig struct {
-	// A cert chain of trusted CA certs. These will be added to the system-wide cert pool of trusted CA's
+	// A cert chain of trusted CA certs. These will be added to the system-wide cert pool of trusted CA's. Cluster-wide CA Certificate setting will be used if this is not provided.
 	//+kubebuilder:validation:Optional
 	CaCerts string `json:"caCerts,omitempty"`
 
-	// The url/ip of a proxy for kapp controller to use when making network requests
+	// The url/ip of a proxy for kapp controller to use when making network requests. Cluster-wide HTTP proxy setting will be used if this is not provided.
 	//+kubebuilder:validation:Optional
 	HTTPProxy string `json:"httpProxy,omitempty"`
 
-	// The url/ip of a TLS capable proxy for kapp-controller to use when making network requests
+	// The url/ip of a TLS capable proxy for kapp-controller to use when making network requests. Cluster-wide HTTPS proxy setting will be used if this is not provided.
 	//+kubebuilder:validation:Optional
 	HTTPSProxy string `json:"httpsProxy,omitempty"`
 
-	// A comma delimited list of domain names which kapp-controller should bypass the proxy for when making requests
+	// A comma delimited list of domain names which kapp-controller should bypass the proxy for when making requests. Cluster-wide no-proxy setting will be used if this is not provided.
 	//+kubebuilder:validation:Optional
 	NoProxy string `json:"noProxy,omitempty"`
 

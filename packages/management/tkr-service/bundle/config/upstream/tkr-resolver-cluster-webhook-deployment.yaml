@@ -1,0 +1,51 @@
+#@ load("@ytt:data", "data")
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  labels:
+    app: tkr-resolver-cluster-webhook
+  name: tkr-resolver-cluster-webhook-manager
+  namespace: #@ data.values.namespace
+  annotations:
+    kapp.k14s.io/change-rule.0: "upsert after upserting tkr-service.tanzu.vmware.com/ClusterRoleBinding"
+    kapp.k14s.io/change-rule.1: "delete before deleting tkr-service.tanzu.vmware.com/ClusterRoleBinding"
+    kapp.k14s.io/change-rule.2: "upsert after upserting tkr-service.tanzu.vmware.com/certificate"
+    kapp.k14s.io/change-rule.3: "delete before deleting tkr-service.tanzu.vmware.com/certificate"
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: tkr-resolver-cluster-webhook
+  template:
+    metadata:
+      labels:
+        app: tkr-resolver-cluster-webhook
+    spec:
+      containers:
+      - image: tkr-resolver-cluster-webhook:latest
+        imagePullPolicy: Always
+        name: manager
+        command:
+        - /manager
+        resources:
+          limits:
+            cpu: 100m
+            memory: 30Mi
+          requests:
+            cpu: 100m
+            memory: 20Mi
+        ports:
+        - containerPort: 9443
+          name: webhook-server
+          protocol: TCP
+        volumeMounts:
+        - mountPath: /tmp/k8s-webhook-server/serving-certs
+          name: cert
+          readOnly: true
+      serviceAccount: tkr-service-manager-sa
+      terminationGracePeriodSeconds: 10
+      volumes:
+      - name: cert
+        secret:
+          secretName: tkr-resolver-cluster-webhook-service-cert

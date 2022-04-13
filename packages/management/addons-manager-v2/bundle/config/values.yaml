@@ -1,0 +1,14 @@
+#@data/values
+#@overlay/match-child-defaults missing_ok=True
+
+---
+tanzuAddonsManager:
+  namespace: tkg-system
+  createNamespace: true
+  deployment:
+    hostNetwork: true
+    priorityClassName: null
+    tolerations: []
+    healthzPort: 18316
+  featureGates:
+    clusterBootstrapController: false

@@ -184,7 +184,7 @@ func watchMgmtCluster(o client.Object) []reconcile.Request {
 	if labels == nil {
 		return nil
 	}
-	if _, exists := labels[constants.ManagememtClusterRoleLabel]; exists {
+	if _, exists := labels[constants.ManagementClusterRoleLabel]; exists {
 		return []reconcile.Request{{NamespacedName: client.ObjectKey{
 			Namespace: constants.TKRNamespace,
 			Name:      constants.BOMMetadataConfigMapName,
@@ -524,10 +524,13 @@ func (r *reconciler) Start(ctx context.Context) error {
 		return errors.Wrap(err, "failed to configure the controller")
 	}
 
-	registryCertPath, err := getRegistryCertFile()
-	if err == nil {
-		if _, err = os.Stat(registryCertPath); err == nil {
-			r.registryOps.CACertPaths = []string{registryCertPath}
+	// Add custom CA cert paths only if VerifyCerts is enabled
+	if r.registryOps.VerifyCerts {
+		registryCertPath, err := getRegistryCertFile()
+		if err == nil {
+			if _, err = os.Stat(registryCertPath); err == nil {
+				r.registryOps.CACertPaths = []string{registryCertPath}
+			}
 		}
 	}
 

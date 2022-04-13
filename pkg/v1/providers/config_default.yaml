@@ -547,12 +547,16 @@ AVI_DISABLE_INGRESS_CLASS: true
 AVI_AKO_IMAGE_PULL_POLICY: IfNotPresent
 AVI_ADMIN_CREDENTIAL_NAME: avi-controller-credentials
 AVI_CA_NAME: avi-controller-ca
+AVI_CONTROLLER_VERSION: 20.1.3
 
 AVI_CONTROLLER:
 AVI_USERNAME: ""
 AVI_PASSWORD: ""
 AVI_CLOUD_NAME:
 AVI_SERVICE_ENGINE_GROUP:
+#! t1 router specifies the path for NSX Advanced Loader Balancer backend network,
+#! only applies when configure NSX ALB to NSX-T cloud.
+AVI_NSXT_T1LR:
 
 #! WARNING: service engine group separation support is not enabled (because it is under development).
 #! To use a different service engine group in the management cluster, set AVI_MANAGEMENT_CLUSTER_SERVICE_ENGINE_GROUP variable to the management cluster service engine group
@@ -598,6 +602,8 @@ ANTREA_ENDPOINTSLICE: true
 ANTREA_POLICY: true
 ANTREA_NODEPORTLOCAL: false
 ANTREA_TRACEFLOW: true
+ANTREA_EGRESS: false
+ANTREA_FLOWEXPORTER: false
 ANTREA_DISABLE_UDP_TUNNEL_OFFLOAD: false
 
 
@@ -622,7 +628,8 @@ VSPHERE_VERSION:
 #! CORE_DNS_IP is the IP of core DNS service, supports both IPv4 and IPv6
 #! It is the 10th index of SERVICE_CIDR subnet
 CORE_DNS_IP:
-
+#! This defines feature flag package-based-lcm is enabled or not
+FEATURE_FLAG_PACKAGE_BASED_LCM:
 
 #! ---------------------------------------------------------------------
 #! BoM file processing, internal use only
